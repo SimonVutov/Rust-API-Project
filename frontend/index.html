@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Notes</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="header">
+        <h1>Notes</h1>
+        <p class="sub">Minimal frontend for the Rust backend.</p>
+      </header>
+
+      <section class="composer">
+        <textarea id="content" rows="4" placeholder="Write a note..."></textarea>
+        <div class="row">
+          <label class="check">
+            <input type="checkbox" id="pinned" />
+            <span>Pinned</span>
+          </label>
+          <input id="tags" type="text" placeholder="tags, comma-separated" />
+          <button id="add">Add note</button>
+        </div>
+      </section>
+
+      <section>
+        <div class="toolbar">
+          <button id="refresh">Refresh</button>
+          <span id="status" class="status"></span>
+        </div>
+        <ul id="notes" class="notes"></ul>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
