@@ -1,12 +1,27 @@
-use crate::app::{Note, note_to_json, save_notes};
+use crate::app::{Note, save_notes};
 use crate::http::Request;
 use crate::http::response::write_response;
-use crate::util::{json_get_bool, json_get_string, json_get_string_array, now_ms};
+use crate::util::now_ms;
+use serde::Deserialize;
 use std::cmp::Ordering;
 use std::io;
 use std::net::TcpStream;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+
+#[derive(Deserialize)]
+struct NoteCreate {
+    content: Option<String>,
+    pinned: Option<bool>,
+    tags: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+struct NotePatch {
+    content: Option<String>,
+    pinned: Option<bool>,
+    tags: Option<Vec<String>>,
+}
 
 pub fn handle_request(req: Request, notes: Arc<Mutex<Vec<Note>>>, data_path: &Path, stream: &mut TcpStream) -> io::Result<()> {
     // Handle CORS preflight
@@ -22,28 +37,30 @@ pub fn handle_request(req: Request, notes: Arc<Mutex<Vec<Note>>>, data_path: &Pa
         ("GET", "/api/notes") => {
             let notes = notes.lock().unwrap();
             // sort pinned first (updated_ms desc within pinned), then updated_ms desc
-            let mut idxs: Vec<usize> = (0..notes.len()).collect();
-            idxs.sort_by(|&a, &b| {
-                let na = &notes[a];
-                let nb = &notes[b];
-                match (na.pinned, nb.pinned) {
-                    (true, false) => Ordering::Less,
-                    (false, true) => Ordering::Greater,
-                    _ => nb.updated_ms.cmp(&na.updated_ms),
-                }
+            let mut ordered: Vec<&Note> = notes.iter().collect();
+            ordered.sort_by(|a, b| match (a.pinned, b.pinned) {
+                (true, false) => Ordering::Less,
+                (false, true) => Ordering::Greater,
+                _ => b.updated_ms.cmp(&a.updated_ms),
             });
 
-            let json_list = idxs.into_iter().map(|i| note_to_json(&notes[i])).collect::<Vec<_>>().join(",");
-
-            let body = format!("[{}]", json_list);
+            let body = match serde_json::to_string(&ordered) {
+                Ok(json) => json,
+                Err(_) => "[]".to_string(),
+            };
             return write_response(stream, 200, "OK", "application/json", body.as_bytes());
         }
         ("POST", "/api/notes") => {
-            let body_str = String::from_utf8_lossy(&req.body);
+            let payload = match serde_json::from_slice::<NoteCreate>(&req.body) {
+                Ok(payload) => payload,
+                Err(_) => {
+                    return write_response(stream, 400, "Bad Request", "application/json", b"{\"error\":\"invalid json\"}");
+                }
+            };
 
-            let content = json_get_string(&body_str, "content").unwrap_or_default();
-            let pinned = json_get_bool(&body_str, "pinned").unwrap_or(false);
-            let tags = json_get_string_array(&body_str, "tags").unwrap_or_else(|| vec![]);
+            let content = payload.content.unwrap_or_default();
+            let pinned = payload.pinned.unwrap_or(false);
+            let tags = payload.tags.unwrap_or_else(Vec::new);
 
             let t = now_ms();
             let id = (t as u64) ^ (t as u64).wrapping_mul(2654435761);
@@ -58,7 +75,10 @@ pub fn handle_request(req: Request, notes: Arc<Mutex<Vec<Note>>>, data_path: &Pa
                 }
             }
 
-            let resp = note_to_json(&note);
+            let resp = match serde_json::to_string(&note) {
+                Ok(json) => json,
+                Err(_) => "{}".to_string(),
+            };
             return write_response(stream, 201, "Created", "application/json", resp.as_bytes());
         }
         _ => {}
@@ -71,27 +91,38 @@ pub fn handle_request(req: Request, notes: Arc<Mutex<Vec<Note>>>, data_path: &Pa
                 "GET" => {
                     let notes = notes.lock().unwrap();
                     if let Some(note) = notes.iter().find(|n| n.id == id) {
-                        let resp = note_to_json(note);
+                        let resp = match serde_json::to_string(note) {
+                            Ok(json) => json,
+                            Err(_) => "{}".to_string(),
+                        };
                         return write_response(stream, 200, "OK", "application/json", resp.as_bytes());
                     } else {
                         return write_response(stream, 404, "Not Found", "application/json", b"{\"error\":\"not found\"}");
                     }
                 }
                 "PATCH" => {
-                    let body_str = String::from_utf8_lossy(&req.body);
+                    let patch = match serde_json::from_slice::<NotePatch>(&req.body) {
+                        Ok(patch) => patch,
+                        Err(_) => {
+                            return write_response(stream, 400, "Bad Request", "application/json", b"{\"error\":\"invalid json\"}");
+                        }
+                    };
                     let mut notes = notes.lock().unwrap();
                     if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
-                        if let Some(content) = json_get_string(&body_str, "content") {
+                        if let Some(content) = patch.content {
                             note.content = content;
                         }
-                        if let Some(pinned) = json_get_bool(&body_str, "pinned") {
+                        if let Some(pinned) = patch.pinned {
                             note.pinned = pinned;
                         }
-                        if let Some(tags) = json_get_string_array(&body_str, "tags") {
+                        if let Some(tags) = patch.tags {
                             note.tags = tags;
                         }
                         note.updated_ms = now_ms();
-                        let resp = note_to_json(note);
+                        let resp = match serde_json::to_string(note) {
+                            Ok(json) => json,
+                            Err(_) => "{}".to_string(),
+                        };
                         if let Err(e) = save_notes(data_path, &notes) {
                             eprintln!("failed to save notes: {}", e);
                         }
