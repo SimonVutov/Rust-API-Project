@@ -8,9 +8,9 @@
 
 body {
   margin: 0;
-  font-family: "Times New Roman", Times, serif;
-  background: #f7f3ee;
-  color: #1b1b1b;
+  font-family: 'Times New Roman', Times, serif;
+  background: #ffffff;
+  color: #000000;
 }
 
 .page {
@@ -27,7 +27,7 @@ body {
 
 .sub {
   margin: 6px 0 28px;
-  color: #555;
+  color: #555555;
 }
 
 .composer textarea,
@@ -35,8 +35,12 @@ body {
   width: 100%;
   font-family: inherit;
   padding: 10px;
-  border: 1px solid #bdb6a8;
-  background: #fffdfa;
+  border: 1px solid #bbbbbb;
+  background: #ffffff;
+}
+
+.composer textarea {
+  resize: none;
 }
 
 .row {
@@ -56,13 +60,14 @@ body {
 button {
   font-family: inherit;
   padding: 8px 16px;
-  border: 1px solid #2c2c2c;
-  background: #f0e9de;
+  border: 1px solid #222222;
+  background: #f5f5f5;
   cursor: pointer;
+  color: #000000;
 }
 
 button:hover {
-  background: #e7dfd1;
+  background: #e0e0e0;
 }
 
 .toolbar {
@@ -73,11 +78,11 @@ button:hover {
 }
 
 .status {
-  color: #666;
+  color: #666666;
 }
 
 .status.error {
-  color: #a12626;
+  color: #222222;
 }
 
 .notes {
@@ -89,9 +94,9 @@ button:hover {
 }
 
 .note {
-  border: 1px solid #c5bcae;
+  border: 1px solid #bbbbbb;
   padding: 14px 16px;
-  background: #fffdfa;
+  background: #ffffff;
 }
 
 .note-head {
@@ -102,12 +107,12 @@ button:hover {
 }
 
 .meta {
-  color: #666;
+  color: #666666;
   font-size: 14px;
 }
 
 .tags {
-  color: #444;
+  color: #444444;
   font-style: italic;
   margin-top: 6px;
 }
@@ -119,22 +124,23 @@ button:hover {
 .pill {
   border-radius: 999px;
   padding: 4px 12px;
-  border: 1px solid #666;
-  background: #f7f2ea;
+  border: 1px solid #666666;
+  background: #ffffff;
+  color: #000000;
 }
 
 .pill.active {
-  background: #ead9c4;
+  background: #e0e0e0;
 }
 
 button.danger {
-  border-color: #a12626;
-  color: #a12626;
-  background: #fff5f5;
+  border-color: #222222;
+  color: #222222;
+  background: #ffffff;
 }
 
 button.danger:hover {
-  background: #ffe8e8;
+  background: #e0e0e0;
 }
 
 @media (max-width: 700px) {
