@@ -174,7 +174,50 @@ fn main() -> std::io::Result<()> {
         write_response(stream, 204, "No Content", "text/plain", b"")
     });
 
+    let notes_changes = Arc::clone(&notes);
+    router.add_prefix_route(Method::Get, "/api/notes-changes/", move |req, stream| {
+        let id = match parse_note_changes_id(&req.path) {
+            Some(id) => id,
+            None => return write_response(stream, 404, "Not Found", "text/plain", b"invalid note id"),
+        };
+
+        let notes = notes_changes.lock().unwrap();
+        let note = match notes.iter().find(|n| n.id == id) {
+            Some(n) => n,
+            None => return write_response(stream, 404, "Not Found", "text/plain", b"note not found"),
+        };
+
+        let mut s = String::new();
+
+        for c in note.changes.iter() {
+            s.push_str(" => ");
+            if c.pin_change.before != c.pin_change.after {
+                s.push_str(&format!("Pin changed from {} to {} at {}\n", c.pin_change.before, c.pin_change.after, c.change_date_ms));
+            }
+            if c.tag_change.before != c.tag_change.after {
+                s.push_str(&format!("Tags changed from {:?} to {:?} at {}\n", c.tag_change.before, c.tag_change.after, c.change_date_ms));
+            }
+            if c.content_change.before != c.content_change.after {
+                s.push_str(&format!("Content changed at {}\n", c.change_date_ms));
+            }
+        }
+
+        write_response(stream, 200, "OK", "text/plain", s.as_bytes())
+    });
+
     serve(addr, router)
+}
+
+fn parse_note_changes_id(path: &str) -> Option<u64> {
+    let prefix = "/api/notes-changes/";
+    if !path.starts_with(prefix) {
+        return None;
+    }
+    let id_str = &path[prefix.len()..];
+    if id_str.is_empty() {
+        return None;
+    }
+    id_str.parse::<u64>().ok()
 }
 
 fn parse_note_id(path: &str) -> Option<u64> {

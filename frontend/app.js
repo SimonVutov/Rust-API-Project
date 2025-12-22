@@ -61,6 +61,12 @@ function renderNote(note) {
   edit.addEventListener('click', () => editNote(note))
   actions.appendChild(edit)
 
+  const view_changes = document.createElement('button')
+  view_changes.className = 'secondary'
+  view_changes.textContent = 'Changes'
+  view_changes.addEventListener('click', () => viewChanges(note))
+  actions.appendChild(view_changes)
+
   li.appendChild(header)
   li.appendChild(body)
   li.appendChild(tags)
@@ -139,6 +145,19 @@ async function deleteNote(note) {
     await fetchNotes()
   } catch (err) {
     setStatus('Failed to delete note', true)
+  }
+}
+
+async function viewChanges(note) {
+  try {
+    const res = await fetch(`${API}/api/notes-changes/${encodeURIComponent(note.id)}`)
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`)
+    }
+    const text = await res.text()
+    alert(text || '(no changes)')
+  } catch (err) {
+    setStatus('Failed to load changes', true)
   }
 }
 
