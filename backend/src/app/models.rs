@@ -14,12 +14,25 @@ pub struct Note {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Change {
     pub change_date_ms: u128,
-    pub kind: ChangeKind,
+    pub pin_change: PinChange,
+    pub tag_change: TagChange,
+    pub content_change: ContentChange,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum ChangeKind {
-    PinChange { before: bool, after: bool },
-    TagChange { before: Vec<String>, after: Vec<String> },
-    ContentChange { before: String, after: String },
+pub struct PinChange {
+    pub before: bool,
+    pub after: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TagChange {
+    pub before: Vec<String>,
+    pub after: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ContentChange {
+    pub before: String,
+    pub after: String,
 }

@@ -111,8 +111,23 @@ fn main() -> std::io::Result<()> {
             Err(_) => return write_response(stream, 400, "Bad Request", "application/json", b"{\"error\":\"invalid json\"}"),
         };
 
+        let before_pin_change = {
+            let notes = notes_patch.lock().unwrap();
+            notes.iter().find(|n| n.id == id).map(|n| n.pinned)
+        };
+        let before_tag_change = {
+            let notes = notes_patch.lock().unwrap();
+            notes.iter().find(|n| n.id == id).map(|n| n.tags.clone())
+        };
+        let before_content_change = {
+            let notes = notes_patch.lock().unwrap();
+            notes.iter().find(|n| n.id == id).map(|n| n.content.clone())
+        };
+
         let mut notes = notes_patch.lock().unwrap();
-        if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
+        let note_index = notes.iter().position(|n| n.id == id);
+        if let Some(index) = note_index {
+            let note = &mut notes[index];
             if let Some(content) = patch.content {
                 note.content = content;
             }
@@ -123,10 +138,16 @@ fn main() -> std::io::Result<()> {
                 note.tags = tags;
             }
             note.updated_ms = now_ms();
-            let resp = serde_json::to_string(note).unwrap_or_else(|_| "{}".to_string());
+            note.changes.push(Change {
+                change_date_ms: now_ms(),
+                pin_change: PinChange { before: before_pin_change.unwrap_or(note.pinned), after: note.pinned },
+                tag_change: TagChange { before: before_tag_change.unwrap_or_else(|| note.tags.clone()), after: note.tags.clone() },
+                content_change: ContentChange { before: before_content_change.unwrap_or_else(|| note.content.clone()), after: note.content.clone() },
+            });
             if let Err(e) = save_notes(&data_path_patch, &notes) {
                 eprintln!("failed to save notes: {}", e);
             }
+            let resp = serde_json::to_string(&notes[index]).unwrap_or_else(|_| "{}".to_string());
             write_response(stream, 200, "OK", "application/json", resp.as_bytes())
         } else {
             write_response(stream, 404, "Not Found", "application/json", b"{\"error\":\"not found\"}")
