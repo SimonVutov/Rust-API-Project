@@ -1,7 +1,6 @@
-use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use serde::Deserialize;
+use std::cmp::Ordering;
 use std::sync::{Arc, Mutex};
-use std::thread;
 
 mod app;
 mod http;
@@ -9,26 +8,24 @@ mod util;
 
 use crate::app::*;
 use crate::http::*;
+use crate::util::now_ms;
 
-fn handle_connection(mut stream: TcpStream, notes: Arc<Mutex<Vec<Note>>>, data_path: PathBuf) {
-    thread::spawn(move || {
-        let req = match parse_http_request(&mut stream) {
-            Ok(r) => r,
-            Err(_) => {
-                let _ = write_response(&mut stream, 400, "Bad Request", "application/json", b"{\"error\":\"bad request\"}");
-                return;
-            }
-        };
+#[derive(Deserialize)]
+struct NoteCreate {
+    content: Option<String>,
+    pinned: Option<bool>,
+    tags: Option<Vec<String>>,
+}
 
-        let _ = handle_request(req, notes, &data_path, &mut stream);
-    });
+#[derive(Deserialize)]
+struct NotePatch {
+    content: Option<String>,
+    pinned: Option<bool>,
+    tags: Option<Vec<String>>,
 }
 
 fn main() -> std::io::Result<()> {
     let addr = "127.0.0.1:8080";
-    let listener = TcpListener::bind(addr)?;
-    println!("Listening on http://{}", addr);
-
     let data_path = notes_path();
     let initial_notes = match load_notes(&data_path) {
         Ok(notes) => notes,
@@ -39,15 +36,133 @@ fn main() -> std::io::Result<()> {
     };
     let notes: Arc<Mutex<Vec<Note>>> = Arc::new(Mutex::new(initial_notes));
 
-    for stream in listener.incoming() {
-        let notes = Arc::clone(&notes);
-        match stream {
-            Ok(stream) => handle_connection(stream, notes, data_path.clone()),
-            Err(e) => eprintln!("connection failed: {}", e),
-        }
-    }
+    let mut router = Router::new();
 
-    Ok(())
+    router.add_route(Method::Get, "/health", |_req, stream| write_response(stream, 200, "OK", "text/plain", b"ok"));
+
+    let notes_list = Arc::clone(&notes);
+    router.add_route(Method::Get, "/api/notes", move |_req, stream| {
+        let notes = notes_list.lock().unwrap();
+        let mut ordered: Vec<&Note> = notes.iter().collect();
+        ordered.sort_by(|a, b| match (a.pinned, b.pinned) {
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            _ => b.updated_ms.cmp(&a.updated_ms),
+        });
+
+        let body = serde_json::to_string(&ordered).unwrap_or_else(|_| "[]".to_string());
+        write_response(stream, 200, "OK", "application/json", body.as_bytes())
+    });
+
+    let notes_create = Arc::clone(&notes);
+    let data_path_create = data_path.clone();
+    router.add_route(Method::Post, "/api/notes", move |req, stream| {
+        let payload = match serde_json::from_slice::<NoteCreate>(&req.body) {
+            Ok(payload) => payload,
+            Err(_) => return write_response(stream, 400, "Bad Request", "application/json", b"{\"error\":\"invalid json\"}"),
+        };
+
+        let content = payload.content.unwrap_or_default();
+        let pinned = payload.pinned.unwrap_or(false);
+        let tags = payload.tags.unwrap_or_else(Vec::new);
+
+        let t = now_ms();
+        let id = (t as u64) ^ (t as u64).wrapping_mul(2654435761);
+
+        let note = Note { id, created_ms: t, updated_ms: t, pinned, tags, content, changes: Vec::new() };
+
+        {
+            let mut notes = notes_create.lock().unwrap();
+            notes.push(note.clone());
+            if let Err(e) = save_notes(&data_path_create, &notes) {
+                eprintln!("failed to save notes: {}", e);
+            }
+        }
+
+        let resp = serde_json::to_string(&note).unwrap_or_else(|_| "{}".to_string());
+        write_response(stream, 201, "Created", "application/json", resp.as_bytes())
+    });
+
+    let notes_get_one = Arc::clone(&notes);
+    router.add_prefix_route(Method::Get, "/api/notes/", move |req, stream| {
+        let id = match parse_note_id(&req.path) {
+            Some(id) => id,
+            None => return write_response(stream, 404, "Not Found", "application/json", b"{\"error\":\"not found\"}"),
+        };
+
+        let notes = notes_get_one.lock().unwrap();
+        if let Some(note) = notes.iter().find(|n| n.id == id) {
+            let resp = serde_json::to_string(note).unwrap_or_else(|_| "{}".to_string());
+            write_response(stream, 200, "OK", "application/json", resp.as_bytes())
+        } else {
+            write_response(stream, 404, "Not Found", "application/json", b"{\"error\":\"not found\"}")
+        }
+    });
+
+    let notes_patch = Arc::clone(&notes);
+    let data_path_patch = data_path.clone();
+    router.add_prefix_route(Method::Patch, "/api/notes/", move |req, stream| {
+        let id = match parse_note_id(&req.path) {
+            Some(id) => id,
+            None => return write_response(stream, 404, "Not Found", "application/json", b"{\"error\":\"not found\"}"),
+        };
+        let patch = match serde_json::from_slice::<NotePatch>(&req.body) {
+            Ok(patch) => patch,
+            Err(_) => return write_response(stream, 400, "Bad Request", "application/json", b"{\"error\":\"invalid json\"}"),
+        };
+
+        let mut notes = notes_patch.lock().unwrap();
+        if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
+            if let Some(content) = patch.content {
+                note.content = content;
+            }
+            if let Some(pinned) = patch.pinned {
+                note.pinned = pinned;
+            }
+            if let Some(tags) = patch.tags {
+                note.tags = tags;
+            }
+            note.updated_ms = now_ms();
+            let resp = serde_json::to_string(note).unwrap_or_else(|_| "{}".to_string());
+            if let Err(e) = save_notes(&data_path_patch, &notes) {
+                eprintln!("failed to save notes: {}", e);
+            }
+            write_response(stream, 200, "OK", "application/json", resp.as_bytes())
+        } else {
+            write_response(stream, 404, "Not Found", "application/json", b"{\"error\":\"not found\"}")
+        }
+    });
+
+    let notes_delete = Arc::clone(&notes);
+    let data_path_delete = data_path.clone();
+    router.add_prefix_route(Method::Delete, "/api/notes/", move |req, stream| {
+        let id = match parse_note_id(&req.path) {
+            Some(id) => id,
+            None => return write_response(stream, 404, "Not Found", "application/json", b"{\"error\":\"not found\"}"),
+        };
+
+        let mut notes = notes_delete.lock().unwrap();
+        let before = notes.len();
+        notes.retain(|n| n.id != id);
+        if notes.len() == before {
+            return write_response(stream, 404, "Not Found", "application/json", b"{\"error\":\"not found\"}");
+        }
+        if let Err(e) = save_notes(&data_path_delete, &notes) {
+            eprintln!("failed to save notes: {}", e);
+        }
+        write_response(stream, 204, "No Content", "text/plain", b"")
+    });
+
+    serve(addr, router)
+}
+
+fn parse_note_id(path: &str) -> Option<u64> {
+    let prefix = "/api/notes/";
+    if !path.starts_with(prefix) {
+        return None;
+    }
+    let id_str = &path[prefix.len()..];
+    id_str.parse::<u64>().ok()
 }
 
 /*

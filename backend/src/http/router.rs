@@ -1,164 +1,89 @@
-use crate::app::{Note, save_notes};
 use crate::http::Request;
 use crate::http::response::write_response;
-use crate::util::now_ms;
-use serde::Deserialize;
-use std::cmp::Ordering;
 use std::io;
 use std::net::TcpStream;
-use std::path::Path;
-use std::sync::{Arc, Mutex};
 
-#[derive(Deserialize)]
-struct NoteCreate {
-    content: Option<String>,
-    pinned: Option<bool>,
-    tags: Option<Vec<String>>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Method {
+    Get,
+    Post,
+    Patch,
+    Delete,
 }
 
-#[derive(Deserialize)]
-struct NotePatch {
-    content: Option<String>,
-    pinned: Option<bool>,
-    tags: Option<Vec<String>>,
+impl Method {
+    fn from_str(method: &str) -> Option<Self> {
+        match method {
+            "GET" => Some(Self::Get),
+            "POST" => Some(Self::Post),
+            "PATCH" => Some(Self::Patch),
+            "DELETE" => Some(Self::Delete),
+            _ => None,
+        }
+    }
 }
 
-pub fn handle_request(req: Request, notes: Arc<Mutex<Vec<Note>>>, data_path: &Path, stream: &mut TcpStream) -> io::Result<()> {
-    // Handle CORS preflight
-    if req.method == "OPTIONS" {
-        return write_response(stream, 204, "No Content", "text/plain", b"");
+enum RouteMatch {
+    Exact(String),
+    Prefix(String),
+}
+
+impl RouteMatch {
+    fn matches(&self, path: &str) -> bool {
+        match self {
+            RouteMatch::Exact(expected) => path == expected,
+            RouteMatch::Prefix(prefix) => path.starts_with(prefix),
+        }
+    }
+}
+
+struct Route {
+    method: Method,
+    matcher: RouteMatch,
+    handler: Box<dyn Fn(&Request, &mut TcpStream) -> io::Result<()> + Send + Sync + 'static>,
+}
+
+pub struct Router {
+    routes: Vec<Route>,
+}
+
+impl Router {
+    pub fn new() -> Self {
+        Self { routes: Vec::new() }
     }
 
-    // Routing
-    match (req.method.as_str(), req.path.as_str()) {
-        ("GET", "/health") => {
-            return write_response(stream, 200, "OK", "text/plain", b"ok");
+    pub fn add_route<F>(&mut self, method: Method, path: &str, handler: F)
+    where
+        F: Fn(&Request, &mut TcpStream) -> io::Result<()> + Send + Sync + 'static,
+    {
+        self.routes.push(Route { method, matcher: RouteMatch::Exact(path.to_string()), handler: Box::new(handler) });
+    }
+
+    pub fn add_prefix_route<F>(&mut self, method: Method, prefix: &str, handler: F)
+    where
+        F: Fn(&Request, &mut TcpStream) -> io::Result<()> + Send + Sync + 'static,
+    {
+        self.routes.push(Route { method, matcher: RouteMatch::Prefix(prefix.to_string()), handler: Box::new(handler) });
+    }
+
+    pub fn handle(&self, req: Request, stream: &mut TcpStream) -> io::Result<()> {
+        if req.method == "OPTIONS" {
+            return write_response(stream, 204, "No Content", "text/plain", b"");
         }
-        ("GET", "/api/notes") => {
-            let notes = notes.lock().unwrap();
-            // sort pinned first (updated_ms desc within pinned), then updated_ms desc
-            let mut ordered: Vec<&Note> = notes.iter().collect();
-            ordered.sort_by(|a, b| match (a.pinned, b.pinned) {
-                (true, false) => Ordering::Less,
-                (false, true) => Ordering::Greater,
-                _ => b.updated_ms.cmp(&a.updated_ms),
-            });
 
-            let body = match serde_json::to_string(&ordered) {
-                Ok(json) => json,
-                Err(_) => "[]".to_string(),
-            };
-            return write_response(stream, 200, "OK", "application/json", body.as_bytes());
-        }
-        ("POST", "/api/notes") => {
-            let payload = match serde_json::from_slice::<NoteCreate>(&req.body) {
-                Ok(payload) => payload,
-                Err(_) => {
-                    return write_response(stream, 400, "Bad Request", "application/json", b"{\"error\":\"invalid json\"}");
-                }
-            };
-
-            let content = payload.content.unwrap_or_default();
-            let pinned = payload.pinned.unwrap_or(false);
-            let tags = payload.tags.unwrap_or_else(Vec::new);
-
-            let t = now_ms();
-            let id = (t as u64) ^ (t as u64).wrapping_mul(2654435761);
-
-            let note = Note { id, created_ms: t, updated_ms: t, pinned, tags, content };
-
-            {
-                let mut notes = notes.lock().unwrap();
-                notes.push(note.clone());
-                if let Err(e) = save_notes(data_path, &notes) {
-                    eprintln!("failed to save notes: {}", e);
-                }
+        let method = match Method::from_str(&req.method) {
+            Some(method) => method,
+            None => {
+                return write_response(stream, 405, "Method Not Allowed", "application/json", b"{\"error\":\"method not allowed\"}");
             }
+        };
 
-            let resp = match serde_json::to_string(&note) {
-                Ok(json) => json,
-                Err(_) => "{}".to_string(),
-            };
-            return write_response(stream, 201, "Created", "application/json", resp.as_bytes());
-        }
-        _ => {}
-    }
-
-    // /api/notes/{id} routes
-    if req.path.starts_with("/api/notes/") {
-        if let Some(id) = parse_note_id(&req.path) {
-            match req.method.as_str() {
-                "GET" => {
-                    let notes = notes.lock().unwrap();
-                    if let Some(note) = notes.iter().find(|n| n.id == id) {
-                        let resp = match serde_json::to_string(note) {
-                            Ok(json) => json,
-                            Err(_) => "{}".to_string(),
-                        };
-                        return write_response(stream, 200, "OK", "application/json", resp.as_bytes());
-                    } else {
-                        return write_response(stream, 404, "Not Found", "application/json", b"{\"error\":\"not found\"}");
-                    }
-                }
-                "PATCH" => {
-                    let patch = match serde_json::from_slice::<NotePatch>(&req.body) {
-                        Ok(patch) => patch,
-                        Err(_) => {
-                            return write_response(stream, 400, "Bad Request", "application/json", b"{\"error\":\"invalid json\"}");
-                        }
-                    };
-                    let mut notes = notes.lock().unwrap();
-                    if let Some(note) = notes.iter_mut().find(|n| n.id == id) {
-                        if let Some(content) = patch.content {
-                            note.content = content;
-                        }
-                        if let Some(pinned) = patch.pinned {
-                            note.pinned = pinned;
-                        }
-                        if let Some(tags) = patch.tags {
-                            note.tags = tags;
-                        }
-                        note.updated_ms = now_ms();
-                        let resp = match serde_json::to_string(note) {
-                            Ok(json) => json,
-                            Err(_) => "{}".to_string(),
-                        };
-                        if let Err(e) = save_notes(data_path, &notes) {
-                            eprintln!("failed to save notes: {}", e);
-                        }
-                        return write_response(stream, 200, "OK", "application/json", resp.as_bytes());
-                    } else {
-                        return write_response(stream, 404, "Not Found", "application/json", b"{\"error\":\"not found\"}");
-                    }
-                }
-                "DELETE" => {
-                    let mut notes = notes.lock().unwrap();
-                    let before = notes.len();
-                    notes.retain(|n| n.id != id);
-                    if notes.len() == before {
-                        return write_response(stream, 404, "Not Found", "application/json", b"{\"error\":\"not found\"}");
-                    }
-                    if let Err(e) = save_notes(data_path, &notes) {
-                        eprintln!("failed to save notes: {}", e);
-                    }
-                    return write_response(stream, 204, "No Content", "text/plain", b"");
-                }
-                _ => {
-                    return write_response(stream, 405, "Method Not Allowed", "application/json", b"{\"error\":\"method not allowed\"}");
-                }
+        for route in &self.routes {
+            if route.method == method && route.matcher.matches(&req.path) {
+                return (route.handler)(&req, stream);
             }
         }
-    }
 
-    write_response(stream, 404, "Not Found", "application/json", b"{\"error\":\"not found\"}")
-}
-
-fn parse_note_id(path: &str) -> Option<u64> {
-    // /api/notes/{id}
-    let prefix = "/api/notes/";
-    if !path.starts_with(prefix) {
-        return None;
+        write_response(stream, 404, "Not Found", "application/json", b"{\"error\":\"not found\"}")
     }
-    let id_str = &path[prefix.len()..];
-    id_str.parse::<u64>().ok()
 }
