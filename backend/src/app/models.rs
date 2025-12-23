@@ -84,3 +84,9 @@ pub struct Session {
     pub session_token: String,
     pub expires_at_ms: u128,
 }
+
+#[derive(Deserialize)]
+pub struct SignPayload {
+    pub username: String,
+    pub password: String,
+}

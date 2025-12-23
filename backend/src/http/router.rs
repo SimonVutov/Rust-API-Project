@@ -1,7 +1,6 @@
-use crate::http::Request;
-use crate::http::response::write_response;
 use std::io;
 use std::net::TcpStream;
+use crate::http::{Request, response::write_response};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Method {

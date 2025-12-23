@@ -1,6 +1,7 @@
 use std::io::Write;
 use std::net::TcpStream;
 
+/// Writes an HTTP response to the given TcpStream.
 pub fn write_response(stream: &mut TcpStream, status_code: u16, status_text: &str, content_type: &str, body: &[u8]) -> std::io::Result<()> {
     // Minimal CORS headers for browser calls
     let headers = format!(

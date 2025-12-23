@@ -1,9 +1,10 @@
-use crate::http::{Router, parse_http_request, write_response};
 use std::io;
 use std::net::TcpListener;
 use std::sync::Arc;
 use std::thread;
+use crate::http::{Router, parse_http_request, write_response};
 
+/// Starts an HTTP server listening on the given address, using the provided router to handle requests.
 pub fn serve(addr: &str, router: Router) -> io::Result<()> {
     let listener = TcpListener::bind(addr)?;
     println!("Listening on http://{}", addr);

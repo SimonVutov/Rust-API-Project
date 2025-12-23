@@ -1,4 +1,3 @@
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::Read;
 use std::net::TcpStream;
@@ -12,13 +11,12 @@ pub struct Request {
     pub body: Vec<u8>,
 }
 
-#[derive(Deserialize)]
-pub struct SignupPayload {
-    pub username: String,
-    pub password: String,
-}
-
+/// Parses an HTTP request from the given TcpStream.
 pub fn parse_http_request(stream: &mut TcpStream) -> std::io::Result<Request> {
+    fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+        haystack.windows(needle.len()).position(|w| w == needle)
+    }
+    
     // Read until we have headers, then read body based on Content-Length (if any).
     let mut buf = Vec::<u8>::new();
     let mut tmp = [0u8; 4096];
@@ -90,8 +88,4 @@ pub fn parse_http_request(stream: &mut TcpStream) -> std::io::Result<Request> {
     }
 
     Ok(Request { method, path, headers, body })
-}
-
-fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|w| w == needle)
 }

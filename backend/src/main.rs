@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::cmp::Ordering;
+use std::{cmp::Ordering, path::Path};
 use std::sync::{Arc, Mutex};
 
 mod app;
@@ -8,10 +8,9 @@ mod util;
 
 use crate::app::*;
 use crate::http::*;
-use crate::util::now_ms;
+use crate::util::*;
 use bcrypt;
 use rand::{RngCore, rngs::OsRng};
-use std::path::Path;
 
 #[derive(Deserialize)]
 struct NoteCreate {
@@ -259,7 +258,7 @@ fn main() -> std::io::Result<()> {
     });
 
     router.add_route(Method::Post, "/api/signup", move |req, stream| {
-        let payload = match serde_json::from_slice::<SignupPayload>(&req.body) {
+        let payload = match serde_json::from_slice::<SignPayload>(&req.body) {
             Ok(payload) => payload,
             Err(_) => return write_response(stream, 400, "Bad Request", "application/json", b"{\"error\":\"invalid json\"}"),
         };
@@ -279,7 +278,7 @@ fn main() -> std::io::Result<()> {
 
     let sessions_for_post_signin = Arc::clone(&sessions);
     router.add_route(Method::Post, "/api/signin", move |req, stream| {
-        let payload = match serde_json::from_slice::<SignupPayload>(&req.body) {
+        let payload = match serde_json::from_slice::<SignPayload>(&req.body) {
             Ok(payload) => payload,
             Err(_) => return write_response(stream, 400, "Bad Request", "application/json", b"{\"error\":\"invalid json\"}"),
         };
