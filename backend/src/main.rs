@@ -3,11 +3,10 @@ use std::{cmp::Ordering, path::Path};
 use std::sync::{Arc, Mutex};
 
 mod app;
-mod http;
 mod util;
 
 use crate::app::*;
-use crate::http::*;
+use rusthttp::{Request, Router, Method, write_response, serve};
 use crate::util::*;
 use bcrypt;
 use rand::{RngCore, rngs::OsRng};

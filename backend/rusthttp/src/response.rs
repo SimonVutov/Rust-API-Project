@@ -1,8 +1,10 @@
-use std::io::Write;
-use std::net::TcpStream;
+use std::io::{self, Write};
 
-/// Writes an HTTP response to the given TcpStream.
-pub fn write_response(stream: &mut TcpStream, status_code: u16, status_text: &str, content_type: &str, body: &[u8]) -> std::io::Result<()> {
+/// Writes an HTTP response to the given writer.
+///
+/// This function writes a minimal set of headers and the raw body. It is generic over any
+/// `Write` implementation to make testing and embedding easier.
+pub fn write_response<W: Write + ?Sized>(stream: &mut W, status_code: u16, status_text: &str, content_type: &str, body: &[u8]) -> io::Result<()> {
     // Minimal CORS headers for browser calls
     let headers = format!(
         "HTTP/1.1 {} {}\r\n\

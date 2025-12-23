@@ -1,6 +1,7 @@
-use std::io;
-use std::net::TcpStream;
-use crate::http::{Request, response::write_response};
+use std::io::{self, Write};
+
+use crate::request::Request;
+use crate::response::write_response;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Method {
@@ -39,7 +40,7 @@ impl RouteMatch {
 struct Route {
     method: Method,
     matcher: RouteMatch,
-    handler: Box<dyn Fn(&Request, &mut TcpStream) -> io::Result<()> + Send + Sync + 'static>,
+    handler: Box<dyn Fn(&Request, &mut dyn Write) -> io::Result<()> + Send + Sync + 'static>,
 }
 
 pub struct Router {
@@ -47,25 +48,29 @@ pub struct Router {
 }
 
 impl Router {
+    /// Create a new, empty router.
     pub fn new() -> Self {
         Self { routes: Vec::new() }
     }
 
+    /// Add an exact-match route for `path`.
     pub fn add_route<F>(&mut self, method: Method, path: &str, handler: F)
     where
-        F: Fn(&Request, &mut TcpStream) -> io::Result<()> + Send + Sync + 'static,
+        F: Fn(&Request, &mut dyn Write) -> io::Result<()> + Send + Sync + 'static,
     {
         self.routes.push(Route { method, matcher: RouteMatch::Exact(path.to_string()), handler: Box::new(handler) });
     }
 
+    /// Add a prefix route that matches paths starting with `prefix`.
     pub fn add_prefix_route<F>(&mut self, method: Method, prefix: &str, handler: F)
     where
-        F: Fn(&Request, &mut TcpStream) -> io::Result<()> + Send + Sync + 'static,
+        F: Fn(&Request, &mut dyn Write) -> io::Result<()> + Send + Sync + 'static,
     {
         self.routes.push(Route { method, matcher: RouteMatch::Prefix(prefix.to_string()), handler: Box::new(handler) });
     }
 
-    pub fn handle(&self, req: Request, stream: &mut TcpStream) -> io::Result<()> {
+    /// Handle a parsed request by dispatching to the first matching route.
+    pub fn handle(&self, req: Request, stream: &mut dyn Write) -> io::Result<()> {
         if req.method == "OPTIONS" {
             return write_response(stream, 204, "No Content", "text/plain", b"");
         }

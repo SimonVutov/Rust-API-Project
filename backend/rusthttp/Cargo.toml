@@ -1,0 +1,13 @@
+[package]
+name = "rusthttp"
+version = "0.1.0"
+edition = "2024"
+description = "A tiny, dependency-free HTTP server crate for small apps and testing."
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://example.com/your/repo"
+authors = ["Your Name <you@example.com>"]
+keywords = ["http", "server", "router", "minimal"]
+categories = ["network-programming"]
+
+[dependencies]

@@ -2,7 +2,7 @@ use std::io;
 use std::net::TcpListener;
 use std::sync::Arc;
 use std::thread;
-use crate::http::{Router, parse_http_request, write_response};
+use crate::{Router, request::parse_http_request, response::write_response};
 
 /// Starts an HTTP server listening on the given address, using the provided router to handle requests.
 pub fn serve(addr: &str, router: Router) -> io::Result<()> {

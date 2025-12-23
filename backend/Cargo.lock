@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "bcrypt",
  "rand",
+ "rusthttp",
  "serde",
  "serde_json",
 ]
@@ -195,6 +196,10 @@ checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom 0.2.16",
 ]
+
+[[package]]
+name = "rusthttp"
+version = "0.1.0"
 
 [[package]]
 name = "ryu"
