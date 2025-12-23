@@ -8,6 +8,9 @@ const tagsEl = document.getElementById('tags')
 const addBtn = document.getElementById('add')
 const refreshBtn = document.getElementById('refresh')
 
+const signupEl = document.getElementById('signup')
+const loginEl = document.getElementById('login')
+
 function setStatus(msg, isError = false) {
   statusEl.textContent = msg
   statusEl.classList.toggle('error', isError)
@@ -191,7 +194,51 @@ async function editNote(note) {
   }
 }
 
+async function authenticate(login_or_signup = 'signup') {
+  const username = document.getElementById('username').value.trim()
+  const password = document.getElementById('password').value.trim()
+
+  if (!username || !password) {
+    setStatus('Username and password are required', true)
+    return
+  }
+
+  if (login_or_signup === 'login') {
+    setStatus('Logging in...')
+    try {
+      const res = await fetch(`${API}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+      if (!res.ok) {
+        throw new Error('Bad response, Error: ' + res.status)
+      }
+      setStatus('Login successful!')
+    } catch (err) {
+      setStatus('Failed to log in, Error: ' + err.message, true)
+    }
+  } else {
+    setStatus('Signing up...')
+    try {
+      const res = await fetch(`${API}/api/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+      if (!res.ok) {
+        throw new Error('Bad response, Error: ' + res.status)
+      }
+      setStatus('Signup successful!')
+    } catch (err) {
+      setStatus('Failed to sign up, Error: ' + err.message, true)
+    }
+  }
+}
+
 addBtn.addEventListener('click', addNote)
 refreshBtn.addEventListener('click', fetchNotes)
+signupEl.addEventListener('click', () => authenticate('signup'))
+loginEl.addEventListener('click', () => authenticate('login'))
 
 fetchNotes()

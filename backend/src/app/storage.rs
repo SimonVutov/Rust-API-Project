@@ -1,3 +1,5 @@
+use crate::models::CheckUserReturn;
+use serde_json::{Value, json};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -26,4 +28,70 @@ pub fn save_notes(path: &Path, notes: &[Note]) -> io::Result<()> {
     }
     let json = serde_json::to_string_pretty(notes).map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
     fs::write(path, json.as_bytes())
+}
+
+pub fn save_user(path: &Path, user: &String, password_hash: &String) -> io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+
+    // Read existing file, default to empty array.
+    let mut users: Value = match fs::read_to_string(path) {
+        Ok(text) => {
+            if text.trim().is_empty() {
+                json!([])
+            } else {
+                serde_json::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
+            }
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => json!([]),
+        Err(e) => return Err(e),
+    };
+
+    // Ensure the JSON is an array.
+    let arr = users.as_array_mut().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "users.json must be a JSON array"))?;
+
+    // Reject duplicate usernames.
+    let exists = arr.iter().any(|u| u["username"].as_str() == Some(user.as_str()));
+    if exists {
+        return Err(io::Error::new(io::ErrorKind::AlreadyExists, "username already exists"));
+    }
+
+    // Append new user.
+    arr.push(json!({
+        "username": user,
+        "password_hash": password_hash
+    }));
+
+    // Write back.
+    let out = serde_json::to_string_pretty(&users).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    fs::write(path, out.as_bytes())
+}
+
+pub fn check_user(path: &Path, user: &String, password: &String) -> CheckUserReturn {
+    let text = match fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return CheckUserReturn { exists: false, correct_password: false, session_token: String::new() },
+        Err(e) => return CheckUserReturn { exists: false, correct_password: false, session_token: String::new() },
+    };
+
+    if text.trim().is_empty() {
+        return CheckUserReturn { exists: false, correct_password: false, session_token: String::new() };
+    }
+
+    let users: Value = serde_json::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e)).unwrap_or(json!([]));
+    
+    let arr = match users.as_array() {
+        Some(a) => a,
+        None => return CheckUserReturn { exists: false, correct_password: false, session_token: String::new() },
+    };
+
+    // if password matches, return true
+    for u in arr {
+        if u["username"].as_str() == Some(user.as_str()) {
+            let ok = bcrypt::verify(password.as_str(), u["password_hash"].as_str().unwrap_or("")).unwrap_or(false);
+            return CheckUserReturn { exists: true, correct_password: ok, session_token: String::new() };
+        }
+    }
+    CheckUserReturn { exists: false, correct_password: false, session_token: String::new() }
 }

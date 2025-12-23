@@ -69,3 +69,9 @@ pub struct ContentChange {
     pub before: String,
     pub after: String,
 }
+
+pub struct CheckUserReturn {
+    pub exists: bool,
+    pub correct_password: bool,
+    pub session_token: String,
+}

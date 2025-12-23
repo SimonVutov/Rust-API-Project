@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::Read;
 use std::net::TcpStream;
@@ -9,6 +10,12 @@ pub struct Request {
     #[allow(dead_code)]
     pub headers: HashMap<String, String>,
     pub body: Vec<u8>,
+}
+
+#[derive(Deserialize)]
+pub struct SignupPayload {
+    pub username: String,
+    pub password: String,
 }
 
 pub fn parse_http_request(stream: &mut TcpStream) -> std::io::Result<Request> {

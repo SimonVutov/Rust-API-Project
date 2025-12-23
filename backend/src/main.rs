@@ -6,9 +6,12 @@ mod app;
 mod http;
 mod util;
 
+use crate::app::storage::save_user;
 use crate::app::*;
 use crate::http::*;
 use crate::util::now_ms;
+use bcrypt;
+use std::path::Path;
 
 #[derive(Deserialize)]
 struct NoteCreate {
@@ -203,6 +206,43 @@ fn main() -> std::io::Result<()> {
         }
 
         write_response(stream, 200, "OK", "text/plain", s.as_bytes())
+    });
+
+    router.add_route(Method::Post, "/api/signup", move |req, stream| {
+        let payload = match serde_json::from_slice::<SignupPayload>(&req.body) {
+            Ok(payload) => payload,
+            Err(_) => return write_response(stream, 400, "Bad Request", "application/json", b"{\"error\":\"invalid json\"}"),
+        };
+
+        let hashed_password = match bcrypt::hash(&payload.password, bcrypt::DEFAULT_COST) {
+            Ok(h) => h,
+            Err(_) => return write_response(stream, 500, "Internal Server Error", "application/json", b"{\"error\":\"hash failed\"}"),
+        };
+
+        let user_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("data").join("users.json");
+        if let Err(e) = save_user(&user_path, &payload.username, &hashed_password) {
+            eprintln!("failed to save user: {}", e);
+            return write_response(stream, 500, "Internal Server Error", "application/json", b"{\"error\":\"internal server error\"}");
+        }
+        write_response(stream, 200, "OK", "application/json", b"{\"status\":\"user created\"}")
+    });
+
+    router.add_route(Method::Post, "/api/login", move |req, stream| {
+        let payload = match serde_json::from_slice::<SignupPayload>(&req.body) {
+            Ok(payload) => payload,
+            Err(_) => return write_response(stream, 400, "Bad Request", "application/json", b"{\"error\":\"invalid json\"}"),
+        };
+
+        let user_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("data").join("users.json");
+        let check_user_response = check_user(&user_path, &payload.username, &payload.password);
+
+        if check_user_response.exists == false || check_user_response.correct_password == false {
+            return write_response(stream, 401, "Unauthorized", "application/json", b"{\"error\":\"invalid credentials\"}");
+        }
+        
+        // create sessions, send token back
+
+        write_response(stream, 200, "OK", "application/json", b"{\"status\":\"user created\"}")
     });
 
     serve(addr, router)
