@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Note {
+    pub username: String,
     #[serde(serialize_with = "serialize_u64_as_string", deserialize_with = "deserialize_u64_from_string_or_number")]
     pub id: u64,
     pub created_ms: u128,
@@ -70,8 +71,16 @@ pub struct ContentChange {
     pub after: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CheckUserReturn {
     pub exists: bool,
     pub correct_password: bool,
     pub session_token: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Session {
+    pub username: String,
+    pub session_token: String,
+    pub expires_at_ms: u128,
 }

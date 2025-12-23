@@ -3,11 +3,16 @@ use serde_json::{Value, json};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use crate::models::Session;
 
 use super::Note;
 
 pub fn notes_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("data").join("note.json")
+}
+
+pub fn sessions_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("data").join("sessions.json")
 }
 
 pub fn load_notes(path: &Path) -> io::Result<Vec<Note>> {
@@ -72,7 +77,7 @@ pub fn check_user(path: &Path, user: &String, password: &String) -> CheckUserRet
     let text = match fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return CheckUserReturn { exists: false, correct_password: false, session_token: String::new() },
-        Err(e) => return CheckUserReturn { exists: false, correct_password: false, session_token: String::new() },
+        Err(_) => return CheckUserReturn { exists: false, correct_password: false, session_token: String::new() },
     };
 
     if text.trim().is_empty() {
@@ -80,7 +85,7 @@ pub fn check_user(path: &Path, user: &String, password: &String) -> CheckUserRet
     }
 
     let users: Value = serde_json::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e)).unwrap_or(json!([]));
-    
+
     let arr = match users.as_array() {
         Some(a) => a,
         None => return CheckUserReturn { exists: false, correct_password: false, session_token: String::new() },
@@ -94,4 +99,24 @@ pub fn check_user(path: &Path, user: &String, password: &String) -> CheckUserRet
         }
     }
     CheckUserReturn { exists: false, correct_password: false, session_token: String::new() }
+}
+
+pub fn load_sessions(path: &Path) -> io::Result<Vec<Session>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let text = fs::read_to_string(path)?;
+    if text.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let sessions = serde_json::from_str::<Vec<Session>>(&text).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    Ok(sessions)
+}
+
+pub fn save_sessions(path: &Path, sessions: &[Session]) -> io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let json = serde_json::to_string_pretty(sessions).map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    fs::write(path, json.as_bytes())
 }

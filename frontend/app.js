@@ -80,7 +80,10 @@ function renderNote(note) {
 async function fetchNotes() {
   setStatus('Loading...')
   try {
-    const res = await fetch(`${API}/api/notes`)
+    const res = await fetch(`${API}/api/notes`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('sessionToken')}` },
+    })
     const data = await res.json()
     notesEl.innerHTML = ''
     data.forEach((note) => notesEl.appendChild(renderNote(note)))
@@ -107,7 +110,7 @@ async function addNote() {
     const res = await fetch(`${API}/api/notes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, session_token: localStorage.getItem('sessionToken') }),
     })
     if (!res.ok) {
       throw new Error('Bad response')
@@ -127,7 +130,7 @@ async function togglePin(note) {
     const res = await fetch(`${API}/api/notes/${note.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pinned: !note.pinned }),
+      body: JSON.stringify({ pinned: !note.pinned, session_token: localStorage.getItem('sessionToken') }),
     })
     if (!res.ok) {
       throw new Error('Bad response')
@@ -141,7 +144,11 @@ async function togglePin(note) {
 async function deleteNote(note) {
   setStatus('Deleting...')
   try {
-    const res = await fetch(`${API}/api/notes/${note.id}`, { method: 'DELETE' })
+    const res = await fetch(`${API}/api/notes/${note.id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_token: localStorage.getItem('sessionToken') }),
+    })
     if (!res.ok && res.status !== 204) {
       throw new Error('Bad response')
     }
@@ -153,7 +160,11 @@ async function deleteNote(note) {
 
 async function viewChanges(note) {
   try {
-    const res = await fetch(`${API}/api/notes-changes/${encodeURIComponent(note.id)}`)
+    const res = await fetch(`${API}/api/notes-changes/${encodeURIComponent(note.id)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_token: localStorage.getItem('sessionToken') }),
+    })
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`)
     }
@@ -183,6 +194,7 @@ async function editNote(note) {
       body: JSON.stringify({
         content: newContent.trim(),
         tags: parseTags(newTags),
+        session_token: localStorage.getItem('sessionToken'),
       }),
     })
     if (!res.ok) {
@@ -209,12 +221,16 @@ async function authenticate(login_or_signup = 'signup') {
       const res = await fetch(`${API}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, session_token: localStorage.getItem('sessionToken') }),
       })
       if (!res.ok) {
         throw new Error('Bad response, Error: ' + res.status)
       }
+      const data = await res.json()
+      localStorage.setItem('sessionToken', data.session_token)
+
       setStatus('Login successful!')
+      fetchNotes()
     } catch (err) {
       setStatus('Failed to log in, Error: ' + err.message, true)
     }
@@ -224,7 +240,7 @@ async function authenticate(login_or_signup = 'signup') {
       const res = await fetch(`${API}/api/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, session_token: localStorage.getItem('sessionToken') }),
       })
       if (!res.ok) {
         throw new Error('Bad response, Error: ' + res.status)

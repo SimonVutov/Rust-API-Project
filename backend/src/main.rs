@@ -6,11 +6,11 @@ mod app;
 mod http;
 mod util;
 
-use crate::app::storage::save_user;
 use crate::app::*;
 use crate::http::*;
 use crate::util::now_ms;
 use bcrypt;
+use rand::{RngCore, rngs::OsRng};
 use std::path::Path;
 
 #[derive(Deserialize)]
@@ -18,6 +18,7 @@ struct NoteCreate {
     content: Option<String>,
     pinned: Option<bool>,
     tags: Option<Vec<String>>,
+    session_token: String,
 }
 
 #[derive(Deserialize)]
@@ -25,6 +26,26 @@ struct NotePatch {
     content: Option<String>,
     pinned: Option<bool>,
     tags: Option<Vec<String>>,
+}
+
+struct CheckSessionTokenResponse {
+    valid: bool,
+    username: String,
+}
+
+fn check_session_token(token: &str, sessions: &Arc<Mutex<Vec<Session>>>) -> CheckSessionTokenResponse {
+    for session in sessions.lock().unwrap().iter() {
+        if session.session_token == token && session.expires_at_ms > now_ms() {
+            return CheckSessionTokenResponse { valid: true, username: session.username.clone() };
+        }
+    }
+    CheckSessionTokenResponse { valid: false, username: String::new() }
+}
+
+fn get_bearer_token(req: &Request) -> Option<String> {
+    let h = req.headers.get("authorization")?;
+    let h = h.trim();
+    h.strip_prefix("Bearer ").or_else(|| h.strip_prefix("bearer ")).map(|s| s.to_string())
 }
 
 fn main() -> std::io::Result<()> {
@@ -37,16 +58,38 @@ fn main() -> std::io::Result<()> {
             Vec::new()
         }
     };
+    let sessions_path = sessions_path();
+    let initial_sessions = match load_sessions(&data_path) {
+        Ok(sessions) => sessions,
+        Err(e) => {
+            eprintln!("failed to load sessions: {}", e);
+            Vec::new()
+        }
+    };
+
     let notes: Arc<Mutex<Vec<Note>>> = Arc::new(Mutex::new(initial_notes));
+    let sessions: Arc<Mutex<Vec<Session>>> = Arc::new(Mutex::new(initial_sessions));
 
     let mut router = Router::new();
+
+    let sessions_for_get_notes = Arc::clone(&sessions);
 
     router.add_route(Method::Get, "/health", |_req, stream| write_response(stream, 200, "OK", "text/plain", b"ok"));
 
     let notes_list = Arc::clone(&notes);
-    router.add_route(Method::Get, "/api/notes", move |_req, stream| {
+    router.add_route(Method::Get, "/api/notes", move |req, stream| {
+        let token = match get_bearer_token(&req) {
+            Some(t) => t,
+            None => return write_response(stream, 401, "Unauthorized", "application/json", b"{\"error\":\"missing authorization header\"}"),
+        };
+
+        let session_check = check_session_token(&token, &sessions_for_get_notes);
+        if !session_check.valid {
+            return write_response(stream, 401, "Unauthorized", "application/json", b"{\"error\":\"invalid session token\"}");
+        }
+
         let notes = notes_list.lock().unwrap();
-        let mut ordered: Vec<&Note> = notes.iter().collect();
+        let mut ordered: Vec<&Note> = notes.iter().filter(|n| n.username == session_check.username).collect();
         ordered.sort_by(|a, b| match (a.pinned, b.pinned) {
             (true, false) => Ordering::Less,
             (false, true) => Ordering::Greater,
@@ -59,6 +102,8 @@ fn main() -> std::io::Result<()> {
 
     let notes_create = Arc::clone(&notes);
     let data_path_create = data_path.clone();
+
+    let sessions_for_post_notes = Arc::clone(&sessions);
     router.add_route(Method::Post, "/api/notes", move |req, stream| {
         let payload = match serde_json::from_slice::<NoteCreate>(&req.body) {
             Ok(payload) => payload,
@@ -72,7 +117,12 @@ fn main() -> std::io::Result<()> {
         let t = now_ms();
         let id = (t as u64) ^ (t as u64).wrapping_mul(2654435761);
 
-        let note = Note { id, created_ms: t, updated_ms: t, pinned, tags, content, changes: Vec::new() };
+        let session_check = check_session_token(&payload.session_token, &sessions_for_post_notes);
+        if !session_check.valid {
+            return write_response(stream, 401, "Unauthorized", "application/json", b"{\"error\":\"invalid session token\"}");
+        }
+
+        let note = Note { username: session_check.username, id, created_ms: t, updated_ms: t, pinned, tags, content, changes: Vec::new() };
 
         {
             let mut notes = notes_create.lock().unwrap();
@@ -227,6 +277,7 @@ fn main() -> std::io::Result<()> {
         write_response(stream, 200, "OK", "application/json", b"{\"status\":\"user created\"}")
     });
 
+    let sessions_for_post_login = Arc::clone(&sessions);
     router.add_route(Method::Post, "/api/login", move |req, stream| {
         let payload = match serde_json::from_slice::<SignupPayload>(&req.body) {
             Ok(payload) => payload,
@@ -239,10 +290,30 @@ fn main() -> std::io::Result<()> {
         if check_user_response.exists == false || check_user_response.correct_password == false {
             return write_response(stream, 401, "Unauthorized", "application/json", b"{\"error\":\"invalid credentials\"}");
         }
-        
-        // create sessions, send token back
 
-        write_response(stream, 200, "OK", "application/json", b"{\"status\":\"user created\"}")
+        // 32 random bytes -> hex string token
+        let mut bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut bytes);
+        let session_token: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+
+        sessions.lock().unwrap().push(Session {
+            username: payload.username.clone(),
+            session_token: session_token.clone(),
+            expires_at_ms: now_ms() + 3600 * 1000, // 1 hour
+        });
+
+        let body = serde_json::json!({
+            "status": "logged in",
+            "session_token": session_token,
+            "expires_at_ms": now_ms() + 3600 * 1000
+        })
+        .to_string();
+
+        if let Err(e) = save_sessions(&sessions_path, &sessions_for_post_login.lock().unwrap()) {
+            eprintln!("failed to save sessions: {}", e);
+        }
+
+        write_response(stream, 200, "OK", "application/json", body.as_bytes())
     });
 
     serve(addr, router)
