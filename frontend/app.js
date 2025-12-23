@@ -7,9 +7,12 @@ const pinnedEl = document.getElementById('pinned')
 const tagsEl = document.getElementById('tags')
 const addBtn = document.getElementById('add')
 const refreshBtn = document.getElementById('refresh')
+const usernameEl = document.getElementById('username')
+const passwordEl = document.getElementById('password')
+const signoutEl = document.getElementById('signout')
 
 const signupEl = document.getElementById('signup')
-const loginEl = document.getElementById('login')
+const signinEl = document.getElementById('signin')
 
 function setStatus(msg, isError = false) {
   statusEl.textContent = msg
@@ -206,7 +209,23 @@ async function editNote(note) {
   }
 }
 
-async function authenticate(login_or_signup = 'signup') {
+function hideSignupSignin() {
+  signupEl.style.display = 'none'
+  signinEl.style.display = 'none'
+  usernameEl.style.display = 'none'
+  passwordEl.style.display = 'none'
+  signoutEl.style.display = 'inline-block'
+}
+
+function showSignupSignin() {
+  signupEl.style.display = 'inline-block'
+  signinEl.style.display = 'inline-block'
+  usernameEl.style.display = 'inline-block'
+  passwordEl.style.display = 'inline-block'
+  signoutEl.style.display = 'none'
+}
+
+async function authenticate(signin_or_signup = 'signup') {
   const username = document.getElementById('username').value.trim()
   const password = document.getElementById('password').value.trim()
 
@@ -215,10 +234,10 @@ async function authenticate(login_or_signup = 'signup') {
     return
   }
 
-  if (login_or_signup === 'login') {
-    setStatus('Logging in...')
+  if (signin_or_signup === 'signin') {
+    setStatus('Signing  in...')
     try {
-      const res = await fetch(`${API}/api/login`, {
+      const res = await fetch(`${API}/api/signin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password, session_token: localStorage.getItem('sessionToken') }),
@@ -229,10 +248,10 @@ async function authenticate(login_or_signup = 'signup') {
       const data = await res.json()
       localStorage.setItem('sessionToken', data.session_token)
 
-      setStatus('Login successful!')
+      setStatus('Signin successful!')
       fetchNotes()
     } catch (err) {
-      setStatus('Failed to log in, Error: ' + err.message, true)
+      setStatus('Failed to sign in, Error: ' + err.message, true)
     }
   } else {
     setStatus('Signing up...')
@@ -242,19 +261,36 @@ async function authenticate(login_or_signup = 'signup') {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password, session_token: localStorage.getItem('sessionToken') }),
       })
+      // if res is 500, it is likely that they meant to sign in instead
+      if (res.status === 500) {
+        throw new Error('User may already exist. Please try signing in instead.')
+      }
       if (!res.ok) {
         throw new Error('Bad response, Error: ' + res.status)
       }
-      setStatus('Signup successful!')
+      setStatus('Signup successful! Now signing you in...')
+      authenticate('signin')
     } catch (err) {
       setStatus('Failed to sign up, Error: ' + err.message, true)
     }
   }
+  if (localStorage.getItem('sessionToken')) hideSignupSignin()
+  else showSignupSignin()
+}
+
+async function signout() {
+  localStorage.removeItem('sessionToken')
+  setStatus('Signed out')
+  showSignupSignin()
+  fetchNotes()
 }
 
 addBtn.addEventListener('click', addNote)
 refreshBtn.addEventListener('click', fetchNotes)
 signupEl.addEventListener('click', () => authenticate('signup'))
-loginEl.addEventListener('click', () => authenticate('login'))
+signinEl.addEventListener('click', () => authenticate('signin'))
+signoutEl.addEventListener('click', signout)
 
 fetchNotes()
+showSignupSignin()
+if (localStorage.getItem('sessionToken')) hideSignupSignin()

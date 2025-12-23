@@ -277,8 +277,8 @@ fn main() -> std::io::Result<()> {
         write_response(stream, 200, "OK", "application/json", b"{\"status\":\"user created\"}")
     });
 
-    let sessions_for_post_login = Arc::clone(&sessions);
-    router.add_route(Method::Post, "/api/login", move |req, stream| {
+    let sessions_for_post_signin = Arc::clone(&sessions);
+    router.add_route(Method::Post, "/api/signin", move |req, stream| {
         let payload = match serde_json::from_slice::<SignupPayload>(&req.body) {
             Ok(payload) => payload,
             Err(_) => return write_response(stream, 400, "Bad Request", "application/json", b"{\"error\":\"invalid json\"}"),
@@ -309,7 +309,7 @@ fn main() -> std::io::Result<()> {
         })
         .to_string();
 
-        if let Err(e) = save_sessions(&sessions_path, &sessions_for_post_login.lock().unwrap()) {
+        if let Err(e) = save_sessions(&sessions_path, &sessions_for_post_signin.lock().unwrap()) {
             eprintln!("failed to save sessions: {}", e);
         }
 
